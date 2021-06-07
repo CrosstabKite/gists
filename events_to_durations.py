@@ -107,8 +107,8 @@ if __name__ == "__main__":
 
     # Extra preprocessing steps
     durations["endpoint_observed"] = durations["endpoint"].notnull()
-    durations["duration_days"] = durations["duration"].dt.total_seconds() / (
-        60 * 60 * 24
+    durations["duration_days"] = (
+        durations["duration"].dt.total_seconds() / (60 * 60 * 24)  # denominator is the number of seconds in a day
     )
 
     # Fit a univariate nonparametric cumulative hazard function with Lifelines.
