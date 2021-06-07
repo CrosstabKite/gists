@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import lifelines
 import plotly.express as px
+from sksurv.util import Surv
+from sksurv.nonparametric import SurvivalFunctionEstimator
 
 
 def events_to_durations(
@@ -19,18 +21,18 @@ def events_to_durations(
         unit, timestamp, event: Names of the corresponding columns in `data`. The
             `event` column must contain values that can be hashed, i.e. not floats. The
             `timestamp` column should be a pandas datetime type.
-        endpoints: Event types of interest, in the `event` column. 
+        endpoints: Event types of interest, in the `event` column.
 
     Returns
         duration (pandas.DataFrame): The duration table. The row index corresponds to
-            the unique entries of the `unit` column in the input `data`. The columns 
+            the unique entries of the `unit` column in the input `data`. The columns
             are:
             - `entry_time`: timestamp of the first observation for each
                 unit.
-            - `endpoint_time`: timestamp of the earliest endpoint event for each user. 
+            - `endpoint_time`: timestamp of the earliest endpoint event for each user.
                 Missing for users with no target events.
-            - `endpoint`: the earliest endpoint event for each user, if any. Missing for
-                users with no target events.
+            - `endpoint`: the earliest endpoint event type for each user, if any. 
+                Missing for users with no target events.
             - `final_obs_time`: `endpoint_time` if it exists, otherwise the latest
                 timestamp in the input `data`.
             - `duration` (pandas.timedelta): the elapsed time from each unit's entry
@@ -42,20 +44,22 @@ def events_to_durations(
     durations = pd.DataFrame(grp[timestamp].min())
     durations.rename(columns={timestamp: "entry_time"}, inplace=True)
 
-    # Find the *earliest* conversion event for each unit.
-    df_convert = event_log.loc[event_log[event].isin(endpoints)]
+    # Find the *earliest* endpoint event for each unit.
+    df_endpoint = event_log.loc[event_log[event].isin(endpoints)]
 
-    grp = df_convert.groupby(unit)
-    endpoint_events = grp[timestamp].idxmin()  # these are indices in the original DataFrame
-    df_convert = df.iloc[endpoint_events].set_index(unit)
+    grp = df_endpoint.groupby(unit)
+    endpoint_events = grp[
+        timestamp
+    ].idxmin()  # these are indices in the original DataFrame
+    df_endpoint = df.iloc[endpoint_events].set_index(unit)
 
-    # Add the conversion time and event to the output DataFrame. Many units will have
+    # Add the endpoint and endpoint time to the output DataFrame. Many units will have
     # missing values for these columns.
-    durations["endpoint"] = df_convert[event]
-    durations["endpoint_time"] = df_convert[timestamp]
+    durations["endpoint"] = df_endpoint[event]
+    durations["endpoint_time"] = df_endpoint[timestamp]
 
     # Compute the target variable, using the censoring time as the default value for the
-    # final observation time if conversion has not yet happened.
+    # final observation time if an endpoint has not yet happened.
     censoring_time = df["timestamp"].max()
 
     durations["final_obs_time"] = durations["endpoint_time"].copy()
@@ -93,7 +97,9 @@ if __name__ == "__main__":
 
     # Sanity check the result. This would be good in a unit test.
     assert len(durations) == df["visitorid"].nunique()
-    assert durations["duration"].max() <= (df["timestamp"].max() - df["timestamp"].min())
+    assert durations["duration"].max() <= (
+        df["timestamp"].max() - df["timestamp"].min()
+    )
     assert (
         durations["endpoint_time"].notnull().sum()
         <= df["event"].isin(["transaction"]).sum()
@@ -101,17 +107,15 @@ if __name__ == "__main__":
 
     # Extra preprocessing steps
     durations["endpoint_observed"] = durations["endpoint"].notnull()
-    durations["duration_days"] = durations["duration"].dt.total_seconds() / (60 * 60 * 24)
-
+    durations["duration_days"] = durations["duration"].dt.total_seconds() / (
+        60 * 60 * 24
+    )
 
     # Fit a univariate nonparametric cumulative hazard function with Lifelines.
     model = lifelines.NelsonAalenFitter()
     model.fit(durations["duration_days"], durations["endpoint_observed"])
 
     # Fit a univariate nonparametric survival function with scikit-survival.
-    from sksurv.util import Surv
-    from sksurv.nonparametric import SurvivalFunctionEstimator
-
     target = Surv().from_dataframe("endpoint_observed", "duration_days", durations)
     model = SurvivalFunctionEstimator()
     model.fit(target)
@@ -133,4 +137,5 @@ if __name__ == "__main__":
     fig.update_traces(line=dict(width=7))
     fig.update_layout(std_layout)
     fig.update_layout(xaxis_title="Days elapsed", yaxis_title="Conversion rate (%)")
-    fig.show()
+    # fig.show()
+    fig.write_image("rocketretail_conversion.png", height=1400, width=1400)
