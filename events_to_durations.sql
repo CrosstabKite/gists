@@ -7,7 +7,7 @@ DROP TABLE event_log;
 CREATE TABLE event_log (
     unix_timestamp NUMERIC,
     visitorid NUMERIC, 
-    event VARCHAR, 
+    event_type VARCHAR, 
     itemid VARCHAR, 
     transactionid VARCHAR
 );
@@ -24,28 +24,33 @@ CSV HEADER;
 SELECT count(1) FROM event_log;
 
 
--- Create a timestamp column. This wouldn't necessarily be a good idea in prod,
--- but it keeps things clean for demos.
--- TODO: need to figure out why this is off by 5 hours.
-ALTER TABLE event_log ADD column timestamp TIMESTAMP WITH TIME ZONE;
-UPDATE event_log SET timestamp = to_timestamp(unix_timestamp / 1000);
+-- Create a timestamp column and drop the original unix epoch column. This
+-- wouldn't necessarily be a good idea in prod, but it keeps things clean for
+-- the article.
+ALTER TABLE event_log ADD column event_at TIMESTAMP WITH TIME ZONE;
+UPDATE event_log SET event_at = to_timestamp(unix_timestamp / 1000);
+ALTER TABLE event_log DROP COLUMN unix_timestamp;
 
 
--- Count number of each type of event
+-- Show the head of the data.
+SELECT * FROM event_log LIMIT 5;
+
+
+-- Count number of each type of event (implicit limit 5)
 SELECT
-    event,
+    event_type,
     count(1) as num_observations
 FROM event_log
 GROUP BY 1
-ORDER BY 2 DESC;
+ORDER BY 2 DESC
 
 
--- View all entries for a visitor who has an endpoint.
+-- View all entries for a visitor who has an endpoint (implicit limit 5)
 SELECT
     *
 FROM event_log 
 WHERE visitorid='1050575' 
-ORDER BY timestamp ASC;
+ORDER BY event_at ASC
 
 
 -- --------------
@@ -56,7 +61,7 @@ ORDER BY timestamp ASC;
 WITH entry_times AS (
     SELECT
         visitorid,
-        min(timestamp) AS timestamp
+        min(event_at) AS event_at
     FROM event_log
     GROUP BY 1
 ),
@@ -65,7 +70,7 @@ WITH entry_times AS (
 endpoint_events AS (
     SELECT *
     FROM event_log
-    WHERE event IN ('transaction')
+    WHERE event_type IN ('transaction')
 ),
 
 first_endpoint_events AS (
@@ -74,7 +79,7 @@ first_endpoint_events AS (
     FROM (
         SELECT
             *,
-            ROW_NUMBER() OVER(PARTITION BY visitorid ORDER BY timestamp ASC) AS row_num
+            ROW_NUMBER() OVER(PARTITION BY visitorid ORDER BY event_at ASC) AS row_num
         FROM endpoint_events
     ) AS _
     WHERE row_num = 1
@@ -82,18 +87,18 @@ first_endpoint_events AS (
 
 -- Define the censoring time to be the latest timestamp in the whole event log.
 censoring AS (
-    SELECT max(timestamp) AS timestamp FROM event_log
+    SELECT max(event_at) AS event_at FROM event_log
 )
 
--- Put all the pieces together as a *duration table*.
+-- Put all the pieces together as a *duration table* (imlicit limit 5).
 SELECT 
     entry_times.visitorid,
-    entry_times.timestamp as entry_time,
-    endpt.event AS endpoint,
-    endpt.timestamp AS endpoint_time,
-    COALESCE(endpt.timestamp, censoring.timestamp) as final_obs_time,
-    COALESCE(endpt.timestamp, censoring.timestamp) - entry_times.timestamp as duration
+    entry_times.event_at as entry_at,
+    endpt.event_type AS endpoint_type,
+    endpt.event_at AS endpoint_at,
+    COALESCE(endpt.event_at, censoring.event_at) as final_obs_at,
+    COALESCE(endpt.event_at, censoring.event_at) - entry_times.event_at as duration
 FROM censoring, entry_times
 LEFT JOIN first_endpoint_events AS endpt
     USING(visitorid)
-LIMIT 5;
+
