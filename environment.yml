@@ -1,0 +1,10 @@
+name: ctk-gists
+dependencies:
+        - python=3.8
+        - pip
+        - pip:
+                - altair==4.1.0
+                - lifelines==0.26.0
+                - matplotlib==3.4.2
+                - plotly==5.1.0
+
