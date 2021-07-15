@@ -107,9 +107,20 @@ if __name__ == "__main__":
 
     # Extra preprocessing steps
     durations["endpoint_observed"] = durations["endpoint"].notnull()
+
+    # Save the durations to disk for future articles.
     durations["duration_days"] = (
         durations["duration"].dt.total_seconds() / (60 * 60 * 24)  # denominator is the number of seconds in a day
     )
+
+    save_cols = [
+        'entry_time',
+        'endpoint_time',
+        'final_obs_time',
+        'endpoint_observed',
+        'duration_days'
+    ]
+    durations[save_cols].to_parquet("data/retailrocket_durations.parquet")
 
     # Fit a univariate nonparametric cumulative hazard function with Lifelines.
     model = lifelines.NelsonAalenFitter()
