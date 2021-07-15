@@ -14,10 +14,9 @@ durations = pd.read_parquet("data/retailrocket_durations.parquet")
 print(durations.head())
 
 
-## Round days down to integers
+## Round days up for a meaningful grouping
 durations["duration_days"] = np.ceil(durations["duration_days"]).astype(int)
 
-## ???
 grp = durations.groupby("duration_days")
 survival = pd.DataFrame(
     {"num_obs": grp.size(), "events": grp["endpoint_observed"].sum()}
@@ -32,11 +31,10 @@ prior_count = survival["num_obs"].cumsum().shift(1, fill_value=0)
 survival.insert(0, "at_risk", num_subjects - prior_count)
 print(survival.head())
 
+
 # Keep only the rows with at least one event, and insert an initial row of 0's.
 survival = survival.loc[survival["events"] > 0]
 
-# survival.loc[0] = {"events": 0, "at_risk": num_subjects}
-# survival.sort_index(inplace=True)
 
 # The number of censored includes units censored at any duration between an event
 # duration and the next event duration. This has to be backed out of the number at-risk:
