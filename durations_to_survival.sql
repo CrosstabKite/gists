@@ -18,18 +18,6 @@ with duration_rounded as (
     from durations
 ),
 
--- Verify that 118 users have duration_days == 0.
--- select * from duration_days where duration_days < 1;
-
--- select
---     visitorid,
---     endpoint_type,
---     case
---         when endpoint_type is null then 0
---         else 1
---     end
--- from durations;
-
 daily_tally as (
     select
         duration_days,
@@ -54,8 +42,13 @@ cumulative_tally as (
 )
 
 select
-    *,
+    duration_days,
+    at_risk,
+    num_obs,
+    events,
     at_risk - events - coalesce(lead(at_risk, 1) over (order by duration_days asc), 0) as censored,
-    sum(events / at_risk) over (order by duration_days asc rows between unbounded preceding and current row) as cumulative_hazard
+    sum(events / at_risk) over (order by duration_days asc rows between unbounded preceding and current row) as cumulative_hazard,
+    exp(sum(ln(1 - events / at_risk)) over (order by duration_days asc rows between unbounded preceding and current row)) as survival_proba,
+    100 * (1 - exp(sum(ln(1 - events / at_risk)) over (order by duration_days asc rows between unbounded preceding and current row))) as conversion_pct
 from cumulative_tally
 where events > 0;
