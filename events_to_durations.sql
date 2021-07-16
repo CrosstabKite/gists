@@ -57,6 +57,8 @@ ORDER BY event_at ASC
 -- Duration table construction starts here.
 -- --------------
 
+CREATE TABLE durations AS 
+
 -- Find the entry time for each unit.
 WITH entry_times AS (
     SELECT
