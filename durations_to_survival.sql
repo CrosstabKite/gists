@@ -14,61 +14,61 @@
 
 -- Convert the durations, which have type `interval` to integer days, by
 -- rounding up.
-with num_subjects as (
-    select count(1) as num_subjects from durations
+WITH num_subjects AS (
+    SELECT COUNT(1) AS num_subjects FROM durations
 ),
 
 -- Explain the interepretation of rounding up to nearest whole duration day.
-duration_rounded as (
-    select 
+duration_rounded AS (
+    SELECT 
         visitorid,
         endpoint_type,
         duration,
-        ceil(extract(epoch from duration)/(24 * 3600)) as duration_days
-    from durations
+        ceil(extract(epoch FROM duration)/(24 * 60 * 60)) AS duration_days
+    FROM durations
 ),
 
--- Explain tally of events as number of non-null entries.
-daily_tally as (
-    select
+-- Explain tally of events AS number of non-null entries.
+daily_tally AS (
+    SELECT
         duration_days,
-        count(1) as num_obs,
-        sum(
-            case
-                when endpoint_type is not null then 1
-                else 0
-            end
-        ) as events
-    from duration_rounded
-    group by 1
+        COUNT(1) AS num_obs,
+        SUM(
+            CASE
+                WHEN endpoint_type IS NOT NULL THEN 1
+                ELSE 0
+            END
+        ) AS events
+    FROM duration_rounded
+    GROUP BY 1
 ),
 
 -- FROM two tables does cross-product. Since num_subjects is a single value, this effectively broadcasts it to every row.
 -- at_risk explanation: subtract running total of observations prior to each row, which includes both observed events and censored durations.
-cumulative_tally as (
-    select 
+cumulative_tally AS (
+    SELECT 
         duration_days,
         num_obs,
         events,
-        num_subjects - coalesce(sum(num_obs) over (order by duration_days asc rows between unbounded preceding and 1 preceding), 0) as at_risk
-    from daily_tally, num_subjects
+        num_subjects - COALESCE(SUM(num_obs) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS at_risk
+    FROM daily_tally, num_subjects
 )
 
--- 1. Censored explanation, can't just subtract events from obs because the
+-- 1. Censored explanation, can't just subtract events FROM obs because the
 --    WHERE clause preceeds the column opereations ("Aggregations"), logically,
 --    and we need to account for the censored obs in the rows that are dropped.
 --    1A. Coalesce to fill in 0 for the last row, which is null because of the
 --    lead function.
--- 2. Kaplan-Meier explanation: no product for aggregations, so hack it with
+-- 2. Kaplan-Meier explanation: no product for aggregations, so hack it WITH
 --    exp(sum(log(.)))
-select
+SELECT
     duration_days,
     at_risk,
     num_obs,
     events,
-    at_risk - events - coalesce(lead(at_risk, 1) over (order by duration_days asc), 0) as censored,
-    exp(sum(ln(1 - events / at_risk)) over (order by duration_days asc rows between unbounded preceding and current row)) as survival_proba,
-    100 * (1 - exp(sum(ln(1 - events / at_risk)) over (order by duration_days asc rows between unbounded preceding and current row))) as conversion_pct,
-    sum(events / at_risk) over (order by duration_days asc rows between unbounded preceding and current row) as cumulative_hazard
-from cumulative_tally
-where events > 0;
+    at_risk - events - COALESCE(lead(at_risk, 1) OVER (ORDER BY duration_days ASC), 0) AS censored,
+    EXP(SUM(LN(1 - events / at_risk)) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW)) AS survival_proba,
+    100 * (1 - EXP(SUM(LN(1 - events / at_risk)) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW))) AS conversion_pct,
+    SUM(events / at_risk) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW) AS cumulative_hazard
+FROM cumulative_tally
+WHERE events > 0;
