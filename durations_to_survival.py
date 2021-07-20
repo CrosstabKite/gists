@@ -77,7 +77,7 @@ fig = (
     .mark_line(interpolate="step-after")
     .encode(
         x=alt.X("duration_days", axis=alt.Axis(title="Duration (days)")),
-        y=alt.Y("conversion_pct", axis=alt.Axis(title="Conversion probability")),
+        y=alt.Y("conversion_pct", axis=alt.Axis(title="Conversion rate (%)")),
     )
 )
 

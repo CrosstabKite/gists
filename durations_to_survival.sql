@@ -1,24 +1,27 @@
 
--- GENERAL NOTES
--- CTEs
--- Useful for analytics dashboards that don't run on Python
--- Useful for big jobs that are easier to run as queries against a data warehouse
+-- Author: Brian Kent, The Crosstab Kite
 
--- -- Explore the durations table again as a refresher.
--- select * from durations limit 5;
+-- Compute Kaplan-Meier survival curves and Nelson-Aalen cumulative hazard
+-- curves in SQL. Accompanies the article at
+-- https://www.crosstab.io/articles/sql-survival-curves.
 
--- select count(1) from durations;
+-- Explore the durations table again as a refresher.
+select * from durations limit 5;
 
--- select count(1) from durations where endpoint_type is not null;
+select count(1) from durations;
+
+select count(1) from durations where endpoint_type is not null;
 
 
--- Convert the durations, which have type `interval` to integer days, by
--- rounding up.
+-- The main query
+CREATE TABLE survival AS
+
 WITH num_subjects AS (
     SELECT COUNT(1) AS num_subjects FROM durations
 ),
 
--- Explain the interepretation of rounding up to nearest whole duration day.
+-- Convert interval-type durations to numeric, by roudning up to nearest whole
+-- duration day.
 duration_rounded AS (
     SELECT 
         visitorid,
@@ -28,7 +31,7 @@ duration_rounded AS (
     FROM durations
 ),
 
--- Explain tally of events AS number of non-null entries.
+-- Count number of observations and experienced outcome events on each duration.
 daily_tally AS (
     SELECT
         duration_days,
@@ -43,14 +46,18 @@ daily_tally AS (
     GROUP BY 1
 ),
 
--- FROM two tables does cross-product. Since num_subjects is a single value, this effectively broadcasts it to every row.
--- at_risk explanation: subtract running total of observations prior to each row, which includes both observed events and censored durations.
+
+-- Count number of subjects still at risk at each duration. Subtract the running
+-- total of observations prior to each row, which includes both observed and
+-- censored durations.
 cumulative_tally AS (
     SELECT 
         duration_days,
         num_obs,
         events,
-        num_subjects - COALESCE(SUM(num_obs) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS at_risk
+        num_subjects - COALESCE(SUM(num_obs) OVER (
+            ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0
+        ) AS at_risk
     FROM daily_tally, num_subjects
 )
 
@@ -67,8 +74,42 @@ SELECT
     num_obs,
     events,
     at_risk - events - COALESCE(lead(at_risk, 1) OVER (ORDER BY duration_days ASC), 0) AS censored,
-    EXP(SUM(LN(1 - events / at_risk)) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW)) AS survival_proba,
-    100 * (1 - EXP(SUM(LN(1 - events / at_risk)) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW))) AS conversion_pct,
-    SUM(events / at_risk) OVER (ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW) AS cumulative_hazard
+
+    EXP(SUM(LN(1 - events / at_risk)) OVER (
+        ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW
+    )) AS survival_proba,
+
+    100 * (1 - EXP(SUM(LN(1 - events / at_risk)) OVER (
+        ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW
+    ))) AS conversion_pct,
+
+    SUM(events / at_risk) OVER (
+        ORDER BY duration_days ASC ROWS BETWEEN UNBOUNDED PRECEDING AND current ROW
+    ) AS cumulative_hazard
+
 FROM cumulative_tally
 WHERE events > 0;
+
+
+-- Print specific output for the article.
+SELECT
+    duration_days,
+    at_risk,
+    num_obs,
+    events,
+    censored
+FROM survival
+ORDER BY duration_days ASC
+LIMIT 5;
+
+SELECT * FROM (
+    SELECT
+        duration_days,
+        TRUNC(survival_proba, 4) AS survival_proba,
+        TRUNC(conversion_pct, 4) AS conversion_pct,
+        TRUNC(cumulative_hazard, 4) AS cumulative_hazard
+    FROM survival
+    ORDER BY duration_days DESC
+    LIMIT 5
+) AS tail
+ORDER BY duration_days ASC;
